@@ -104,7 +104,7 @@ class _MyHomePageState extends State<MyHomePage> {
           Expanded(
             child: Center(
               child: Text(
-                "$_selectedView 화면 테스트.",
+                "$_selectedView 화면",
                 style: const TextStyle(fontSize: 24),
               ),
             ),
