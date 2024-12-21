@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'addData.dart';
+import 'model/MoneyData.dart';
 
-void main() {
+void main() async{
+  WidgetsFlutterBinding.ensureInitialized(); // Flutter 초기화
+  await initializeDateFormatting('ko'); 
   runApp(const MyApp());
 }
 
@@ -34,8 +38,9 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   DateTime _selectedDate = DateTime.now();
-  String _selectedView = '일별'; // 현재 선택된 보기 ("일별", "월별", "달력")
+  String _selectedView = '일별'; 
   int _currentIndex = 0; // BottomNavigationBar 현재 선택된 인덱스
+  Future<List<Map<String, dynamic>>>? _moneyDataFuture;
 
   String get formattedDate {
     return DateFormat('yyyy년 MM월').format(_selectedDate);
@@ -48,10 +53,47 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _initialize() async {
-    final androidId = await getAndroidId();
+  final androidId = await getAndroidId();
     if (androidId != null) {
-      await sendDataToServer(androidId, _selectedDate.year, _selectedDate.month);
+      setState(() {
+        _moneyDataFuture = getGroupedData(androidId, _selectedDate.year, _selectedDate.month);
+        
+      });
+    } else {
+      _moneyDataFuture = Future.value([]);
     }
+  }
+
+  Color _getDayColor(DateTime date) {
+  if (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
+    return Colors.red; // 토요일, 일요일: 빨간색
+  } else {
+    return Colors.blue; // 월요일 ~ 금요일: 파란색
+  }
+}
+
+  Future<List<Map<String, dynamic>>> getGroupedData(String androidId, int year, int month) async {
+    final List<Map<String, dynamic>> moneyDataList = await sendDataToServer(androidId, year, month);
+
+    final Map<String, List<MoneyData>> groupedData = {};
+    for (var group in moneyDataList) {
+      final date = group['date'] as String; // 날짜 키
+      final List<MoneyData> moneyList = group['data'] as List<MoneyData>;
+
+      // 날짜를 키로 그룹화
+      if (!groupedData.containsKey(date)) {
+        groupedData[date] = [];
+      }
+      groupedData[date]!.addAll(moneyList); // 그룹화된 리스트에 데이터 추가
+    }
+
+    return groupedData.entries.map((entry) {
+      final result = {
+        'date': entry.key,
+        'data': entry.value.map((money) => money.toJson()).toList(),
+      };
+      return result;
+    }).toList();
   }
 
   Future<String?> getAndroidId() async {
@@ -60,20 +102,32 @@ class _MyHomePageState extends State<MyHomePage> {
     return androidInfo.id; // Android 고유 ID
   }
 
-  Future<void> sendDataToServer(String androidId, int year, int month) async {
-    final url = Uri.parse('http://61.72.81.36:8080/'); // 백엔드 URL
-    final response = await http.get(
-      url.replace(queryParameters: {
-        'androidId': androidId,
-        'year': year.toString(),
-        'month': month.toString(),
-      }),
-    );
+  Future<List<Map<String, dynamic>>> sendDataToServer(String androidId, int year, int month) async {
+    final url = Uri.parse('http://61.72.81.36:8080/money/day');
+    try {
+      final response = await http.get(
+        url.replace(queryParameters: {
+          'androidID': androidId,
+          'year': year.toString(),
+          'month': month.toString(),
+        }),
+      );
 
-    if (response.statusCode == 200) {
-      print('Data sent successfully: ${response.body}');
-    } else {
-      print('Failed to send data: ${response.statusCode}');
+      if (response.statusCode == 200) {
+        final List<dynamic> jsonData = json.decode(utf8.decode(response.bodyBytes));
+        return jsonData.map((item) {
+          return {
+            'date': item['date'],
+            'data': (item['data'] as List<dynamic>)
+                .map((data) => MoneyData.fromJson(data as Map<String, dynamic>))
+                .toList(),
+          };
+        }).toList();
+      } else {
+        throw Exception('Failed to fetch data: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Error fetching data: $e');
     }
   }
 
@@ -84,9 +138,12 @@ class _MyHomePageState extends State<MyHomePage> {
 
     final androidId = await getAndroidId();
     if (androidId != null) {
-      await sendDataToServer(androidId, _selectedDate.year, _selectedDate.month);
-    }
+      setState(() {
+        // _moneyDataFuture에 새로운 Future 값을 할당하여 FutureBuilder가 재빌드되도록 만듦
+        _moneyDataFuture = getGroupedData(androidId, _selectedDate.year, _selectedDate.month);
+    });
   }
+}
 
   void _goToNextMonth() async {
     setState(() {
@@ -95,7 +152,9 @@ class _MyHomePageState extends State<MyHomePage> {
 
     final androidId = await getAndroidId();
     if (androidId != null) {
-      await sendDataToServer(androidId, _selectedDate.year, _selectedDate.month);
+      setState(() {
+        _moneyDataFuture = getGroupedData(androidId, _selectedDate.year, _selectedDate.month);
+      });
     }
   }
 
@@ -149,15 +208,13 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ),
       body: Container(
-        color: const Color.fromARGB(255, 31, 31, 31), // Body 배경색 설정
+        color: const Color.fromARGB(255, 31, 31, 31), 
         child: Column(
           children: [
-            // Custom Header
             Container(
               color: Colors.black,
               child: Column(
                 children: [
-                  // 날짜와 화살표 영역
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -213,44 +270,172 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             // Main Body
             Expanded(
-              child: _buildBody(),
+              child: FutureBuilder<List<Map<String, dynamic>>>(
+                future: _moneyDataFuture, // 그룹화된 데이터를 가져오는 Future
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Center(child: CircularProgressIndicator());
+                  } else if (snapshot.hasError) {
+                    return Center(child: Text('Error: ${snapshot.error}'));
+                  } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                    return Center(child: Text('No data available'));
+                  }
+
+                  // 데이터 처리
+                  final groupedData = snapshot.data!;
+
+                  return ListView.builder(
+                    itemCount: groupedData.length,
+                    itemBuilder: (context, index) {
+                      final group = groupedData[index];
+                      final date = group['date'] as String; // 날짜 키
+                      final moneyList = (group['data'] as List<dynamic>)
+                          .map((item) => MoneyData.fromJson(item as Map<String, dynamic>))
+                          .toList();
+
+                      return Container(
+                        margin: EdgeInsets.only(bottom: 0), // 그룹 간 간격 추가
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 날짜 출력
+                            Container(
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                border: Border(
+                                  top: BorderSide(color: Colors.white, width: 0.2),
+                                  bottom: BorderSide(color: Colors.white, width: 0.2),
+                                ),
+                              ),
+                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.start,
+                                children: [
+                                  // 날짜 표시
+                                  Text(
+                                    DateFormat('dd').format(DateTime.parse(date)),
+                                    style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white),
+                                  ),
+                                  SizedBox(width: 7), // 날짜와 요일 사이 간격
+                                  // 요일 표시
+                                  Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: _getDayColor(DateTime.parse(date)),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      DateFormat('EEEE', 'ko').format(DateTime.parse(date)), // 요일 축약형 표시
+                                      style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // 해당 날짜의 데이터 리스트 출력
+                            ...moneyList.map((money) {
+                              return Container(
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    bottom: BorderSide(color: Colors.white, width: 0.2), // 아래쪽 흰색 구분선만 추가
+                                  ),
+                                ),
+                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      money.category,
+                                      style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold,),
+                                      
+                                    ),
+                                    SizedBox(width: 18), // 항목 간 간격 추가
+                                    if (money.content.isNotEmpty)
+                                      Expanded(
+                                        flex:4,
+                                        child: Text(
+                                          money.content,
+                                          style: TextStyle(fontSize: 14, color: Colors.white),
+                                          overflow: TextOverflow.ellipsis, // 말줄임표 설정
+                                          maxLines: 1, // 한 줄로 제한
+                                        ),
+                                    ),
+                                    Spacer(),
+                                    Text(
+                                      '${NumberFormat('#,###').format(money.amount)}원', 
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: money.type == 'income' ? Colors.blue : Colors.red, // type에 따라 색상 설정
+                                        fontWeight: FontWeight.bold, // 강조 (선택 사항)
+                                      ),
+                                    ), 
+                                  ],
+                                )
+                              );
+                            }).toList(),
+                            Container(
+                              width: double.infinity,
+                              color: Colors.black, // 검정색 배경
+                              height: 20, // 원하는 높이로 설정
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ],
         ),
       ),
       floatingActionButton: _currentIndex == 0
           ? FloatingActionButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  PageRouteBuilder(
-                    pageBuilder: (context, animation, secondaryAnimation) => const AddDataPage(),
-                    transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                      const begin = Offset(0.0, 1.0);
-                      const end = Offset.zero;
-                      const curve = Curves.ease;
+              onPressed: () async {
+          final result = await Navigator.push( // <-- 변경된 부분
+            context,
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) => const AddDataPage(),
+              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                const begin = Offset(0.0, 1.0);
+                const end = Offset.zero;
+                const curve = Curves.ease;
 
-                      var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                      var offsetAnimation = animation.drive(tween);
+                var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                var offsetAnimation = animation.drive(tween);
 
-                      return SlideTransition(
-                        position: offsetAnimation,
-                        child: child,
-                      );
-                    },
-                  ),
+                return SlideTransition(
+                  position: offsetAnimation,
+                  child: child,
                 );
               },
-              backgroundColor: Colors.red,
-              child: const Icon(Icons.add, color: Colors.white),
-            )
-          : null,
+            ),
+          );
+
+          if (result == true) { // <-- 변경된 부분
+            final androidId = await getAndroidId(); // <-- 변경된 부분
+            if (androidId != null) {
+              await getGroupedData(androidId, _selectedDate.year, _selectedDate.month); // <-- 변경된 부분
+            }
+          }
+        },
+        backgroundColor: Colors.red,
+        child: const Icon(Icons.add, color: Colors.white),
+      )
+    : null,
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (index) {
+        onTap: (index) async{
           setState(() {
             _currentIndex = index;
           });
+
+          if (index == 0) { // 가계부 탭 인덱스
+            final androidId = await getAndroidId();
+            if (androidId != null) {
+              await getGroupedData(androidId, _selectedDate.year, _selectedDate.month);
+            }
+          }
         },
         items: const [
           BottomNavigationBarItem(

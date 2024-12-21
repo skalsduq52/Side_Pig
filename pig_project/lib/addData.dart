@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:device_info_plus/device_info_plus.dart';
 
 class AddDataPage extends StatefulWidget {
   const AddDataPage({Key? key}) : super(key: key);
@@ -19,6 +20,7 @@ class _AddDataPageState extends State<AddDataPage> {
   late TextEditingController _paymentMethodController;
   late TextEditingController _contentController;
   late FocusNode _amountFocusNode;
+  String? _deviceId;
 
   final List<String> categories = [
     '식비',
@@ -46,6 +48,7 @@ class _AddDataPageState extends State<AddDataPage> {
     _contentController = TextEditingController();
     _amountFocusNode = FocusNode(); // 초기화
     _initializeLocaleAndTime(); // 로케일 초기화
+    _initializeDeviceId(); // 디바이스 ID 초기화
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _amountFocusNode.requestFocus(); // 페이지 로드 시 금액 필드에 포커스
@@ -58,6 +61,21 @@ class _AddDataPageState extends State<AddDataPage> {
     Intl.defaultLocale = 'ko_KR'; 
     _setCurrentDateTime();
   }
+
+  Future<void> _initializeDeviceId() async {
+  final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+  try {
+    AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
+    setState(() {
+      _deviceId = androidInfo.id; // 변경된 필드 이름으로 수정
+    });
+  } catch (e) {
+    setState(() {
+      _deviceId = 'Unknown';
+    });
+  }
+}
+
 
   void _setCurrentDateTime() {
     final now = DateTime.now().toLocal(); // 한국시간 반영
@@ -289,13 +307,24 @@ class _AddDataPageState extends State<AddDataPage> {
 
   Future<void> _submitData() async {
     final String url = 'http://61.72.81.36:8080/money';
+    DateTime? parsedDate;
+    try {
+        parsedDate = DateFormat('yyyy/MM/dd (E) a hh:mm', 'ko_KR').parseStrict('20${_dateController.text}');
+    } catch (e) {
+   
+    return; 
+    }
+
+    final String iso8601Date = parsedDate.toIso8601String();
+
     final Map<String, dynamic> requestBody = {
-      'date': _dateController.text,
+      'date': iso8601Date,
       'amount': _amountController.text.replaceAll(',', ''), // 숫자 포맷 제거
       'category': _categoryController.text,
       'paymentMethod': _paymentMethodController.text,
       'content': _contentController.text,
       'type': isIncomeSelected ? 'income' : 'expense',
+      'androidID': _deviceId, // 디바이스 ID 추가
     };
 
     try {
@@ -307,18 +336,17 @@ class _AddDataPageState extends State<AddDataPage> {
 
       if (response.statusCode == 200) {
         // 성공 처리
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('데이터가 성공적으로 저장되었습니다.')),
-        );
+        Navigator.pop(context, true);
       } else {
         // 실패 처리
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('오류가 발생했습니다: ${response.statusCode}')),
-        );
+                );
       }
     } catch (e) {
+      // 네트워크 오류 처리
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('네트워크 오류가 발생했습니다.')),
+        SnackBar(content: Text('네트워크 오류가 발생했습니다: $e')),
       );
     }
   }
@@ -342,7 +370,7 @@ class _AddDataPageState extends State<AddDataPage> {
         backgroundColor: const Color.fromARGB(255, 31, 31, 31),
         title: const Text(
           '수입 / 지출',
-          style: TextStyle(color: Colors.white, fontSize: 18,), // 글자색을 흰색으로 설정
+          style: TextStyle(color: Colors.white, fontSize: 18),
         ),
         centerTitle: true,
         leading: IconButton(
@@ -352,7 +380,7 @@ class _AddDataPageState extends State<AddDataPage> {
           },
         ),
       ),
-      body: SingleChildScrollView( // 스크롤 가능하도록 수정
+      body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
           child: Column(
@@ -367,26 +395,16 @@ class _AddDataPageState extends State<AddDataPage> {
                       });
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
+                      backgroundColor: isIncomeSelected ? Colors.blue : Colors.black,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(5.0),
-                        side: BorderSide(
-                          color: isIncomeSelected ? Colors.blue : Colors.white,
-                          width: isIncomeSelected ? 1.5 : 0.3,
-                        ),
                       ),
                       minimumSize: const Size(140, 10),
                       padding: EdgeInsets.zero,
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 7.0),
-                      child: Text(
-                        '수입',
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: isIncomeSelected ? Colors.blue : Colors.white,
-                        ),
-                      ),
+                    child: const Text(
+                      '수입',
+                      style: TextStyle(fontSize: 15, color: Colors.white),
                     ),
                   ),
                   ElevatedButton(
@@ -396,26 +414,16 @@ class _AddDataPageState extends State<AddDataPage> {
                       });
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
+                      backgroundColor: !isIncomeSelected ? Colors.red : Colors.black,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(5.0),
-                        side: BorderSide(
-                          color: !isIncomeSelected ? Colors.red : Colors.white,
-                          width: !isIncomeSelected ? 1.5 : 0.3,
-                        ),
                       ),
                       minimumSize: const Size(140, 10),
                       padding: EdgeInsets.zero,
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 7.0),
-                      child: Text(
-                        '지출',
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: !isIncomeSelected ? Colors.red : Colors.white,
-                        ),
-                      ),
+                    child: const Text(
+                      '지출',
+                      style: TextStyle(fontSize: 15, color: Colors.white),
                     ),
                   ),
                 ],
