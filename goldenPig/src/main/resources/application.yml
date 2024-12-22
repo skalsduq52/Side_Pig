@@ -1,0 +1,22 @@
+#spring.application.name=goldenPig
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:mariadb://laplace.c3m6o22cgj7p.ap-northeast-2.rds.amazonaws.com:3306/LAPLACE
+    #url: jdbc:mariadb://127.0.0.1:3306/LAPLACE
+    driver-class-name: org.mariadb.jdbc.Driver
+    username: minyeop
+    password: skekd12
+
+  jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
+    properties:
+      hibernate:
+        format_sql: true #To beautify or pretty print the SQL
+        show_sql: true #show sql
+
+logging:
+  level:
+    org.hibernate.SQL: debug
