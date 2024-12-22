@@ -41,6 +41,10 @@ class _MyHomePageState extends State<MyHomePage> {
   String _selectedView = '일별'; 
   int _currentIndex = 0; // BottomNavigationBar 현재 선택된 인덱스
   Future<List<Map<String, dynamic>>>? _moneyDataFuture;
+  int _totalIncome = 0;
+  int _totalExpense = 0;
+
+  int get _totalBalance => _totalIncome - _totalExpense;
 
   String get formattedDate {
     return DateFormat('yyyy년 MM월').format(_selectedDate);
@@ -68,12 +72,14 @@ class _MyHomePageState extends State<MyHomePage> {
   if (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
     return Colors.red; // 토요일, 일요일: 빨간색
   } else {
-    return Colors.blue; // 월요일 ~ 금요일: 파란색
+    return Colors.green; // 월요일 ~ 금요일: 파란색
   }
 }
 
   Future<List<Map<String, dynamic>>> getGroupedData(String androidId, int year, int month) async {
     final List<Map<String, dynamic>> moneyDataList = await sendDataToServer(androidId, year, month);
+    int totalIncome = 0;
+    int totalExpense = 0;
 
     final Map<String, List<MoneyData>> groupedData = {};
     for (var group in moneyDataList) {
@@ -84,8 +90,21 @@ class _MyHomePageState extends State<MyHomePage> {
       if (!groupedData.containsKey(date)) {
         groupedData[date] = [];
       }
-      groupedData[date]!.addAll(moneyList); // 그룹화된 리스트에 데이터 추가
+      groupedData[date]!.addAll(moneyList);
+      
+      for (var money in moneyList) {
+        if (money.type == 'income') {
+          totalIncome += money.amount;
+        } else if (money.type == 'expense') {
+          totalExpense += money.amount;
+        }
+      }  // 그룹화된 리스트에 데이터 추가
     }
+
+    setState((){
+      _totalIncome = totalIncome;
+      _totalExpense = totalExpense;
+    });
 
     return groupedData.entries.map((entry) {
       final result = {
@@ -103,7 +122,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<List<Map<String, dynamic>>> sendDataToServer(String androidId, int year, int month) async {
-    final url = Uri.parse('http://61.72.81.36:8080/money/day');
+    final url = Uri.parse('http://3.34.71.5:8081/money/day');
     try {
       final response = await http.get(
         url.replace(queryParameters: {
@@ -262,9 +281,9 @@ class _MyHomePageState extends State<MyHomePage> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _buildSummaryCard("수입", "₩2,000,000", Colors.blue),
-                  _buildSummaryCard("지출", "₩1,200,000", Colors.red),
-                  _buildSummaryCard("합계", "₩800,000", Colors.white),
+                  _buildSummaryCard("수입", "${NumberFormat('#,###').format(_totalIncome)}원", Colors.blue),
+                  _buildSummaryCard("지출", "${NumberFormat('#,###').format(_totalExpense)}원", Colors.red),
+                  _buildSummaryCard("합계", "${NumberFormat('#,###').format(_totalBalance)}원", Colors.white),
                 ],
               ),
             ),
@@ -292,6 +311,13 @@ class _MyHomePageState extends State<MyHomePage> {
                       final moneyList = (group['data'] as List<dynamic>)
                           .map((item) => MoneyData.fromJson(item as Map<String, dynamic>))
                           .toList();
+
+                      final int groupIncome = moneyList
+                          .where((money) => money.type == 'income')
+                          .fold(0, (sum, money) => sum + money.amount);
+                      final int groupExpense = moneyList
+                          .where((money) => money.type == 'expense')
+                          .fold(0, (sum, money) => sum + money.amount);    
 
                       return Container(
                         margin: EdgeInsets.only(bottom: 0), // 그룹 간 간격 추가
@@ -329,6 +355,17 @@ class _MyHomePageState extends State<MyHomePage> {
                                       style: TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold),
                                     ),
                                   ),
+                                  SizedBox(width: 80),
+                                  Text(
+                                        '${NumberFormat('#,###').format(groupIncome)}원', // 계산된 수입 합계 표시
+                                        style: TextStyle(fontSize: 14, color: Colors.blue), // 파란색 텍스트
+                                    ),
+                                  
+                                  Spacer(),
+                                  Text(
+                                      '${NumberFormat('#,###').format(groupExpense)}원', // 계산된 지출 합계 표시
+                                      style: TextStyle(fontSize: 14, color: Colors.red),
+                                    ),                                  
                                 ],
                               ),
                             ),
@@ -341,7 +378,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                     bottom: BorderSide(color: Colors.white, width: 0.2), // 아래쪽 흰색 구분선만 추가
                                   ),
                                 ),
-                                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                padding: EdgeInsets.only(left: 16, right: 8, top: 8, bottom: 8),
                                 child: Row(
                                   children: [
                                     Text(
@@ -412,10 +449,12 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
           );
 
-          if (result == true) { // <-- 변경된 부분
-            final androidId = await getAndroidId(); // <-- 변경된 부분
+          if (result == true) {
+            final androidId = await getAndroidId();
             if (androidId != null) {
-              await getGroupedData(androidId, _selectedDate.year, _selectedDate.month); // <-- 변경된 부분
+              setState(() {
+                _moneyDataFuture = getGroupedData(androidId, _selectedDate.year, _selectedDate.month);
+              });
             }
           }
         },

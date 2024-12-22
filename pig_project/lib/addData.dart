@@ -306,7 +306,16 @@ class _AddDataPageState extends State<AddDataPage> {
   }
 
   Future<void> _submitData() async {
-    final String url = 'http://61.72.81.36:8080/money';
+    if (_amountController.text.isEmpty || 
+      _categoryController.text.isEmpty || 
+        _paymentMethodController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('모든 필드를 입력해주세요.')),
+      );
+    return;
+    }
+
+    final String url = 'http://3.34.71.5:8081/money';
     DateTime? parsedDate;
     try {
         parsedDate = DateFormat('yyyy/MM/dd (E) a hh:mm', 'ko_KR').parseStrict('20${_dateController.text}');
